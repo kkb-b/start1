@@ -219,6 +219,10 @@ class BossBrick extends Brick {
         
         this.realText = option.realText || option.text || ""; 
         this.realType = option.realType || ""; // 객체 타입 식별용 은닉 변수
+
+
+        // blockPool에는 type,text,color,hp,indestructible 속성들이 저장되어 있음. 그걸 ...으로 표시
+        // 그리고 layer라는 속성을 추가로 저장시킴
     }
 
     onHit() {
@@ -245,12 +249,7 @@ class BossBrick extends Brick {
         ctx.fillStyle = this.color;
         ctx.fill();
         ctx.closePath();
-
-        // ==================================================
-        // 💡 [아키텍트 패치: 강제 글자 덮어쓰기 로직 제거!]
-        // 이전 코드: let displayText = (this.status === "LOCK") ? "LOCK" : (this.text || "");
-        // 현재 코드: 무조건 자신이 부여받은 고유 텍스트(this.text)를 노출합니다.
-        // ==================================================
+        // this.text로 블록을 표현함 
         let displayText = this.text || ""; 
         
         if (displayText !== "") {
@@ -426,19 +425,19 @@ function endGame(message) {
 }
 
 // 충돌 감지 함수
-// === 무결점 물리 엔진 (1프레임 1충돌 및 끼임 방지 적용) ===
+// === 무결점 물리 엔진 (1프레임 1충돌, 끼임 방지 및 정밀한 모서리 반사 적용) ===
 function collisionDetection() {
-    let hasCollidedThisFrame = false; // 1프레임 1충돌을 보장하기 위한 플래그 (이중 파괴 방지)
+    let hasCollidedThisFrame = false; // 1프레임 1충돌을 보장하기 위한 플래그
 
     for(let i = 0; i < bricks.length; i++) {
-        if (hasCollidedThisFrame) break; // 이번 프레임에서 이미 충돌을 처리했다면 나머지 연산 중단
+        if (hasCollidedThisFrame) break; // 이번 프레임에서 이미 충돌을 처리했다면 연산 중단
 
         let b = bricks[i];
         if(b.status !== 0) { 
             let currentWidth = b.width || brickWidth;
             let currentHeight = b.height || brickHeight;
 
-            // 1. 블록의 사각형 영역 안에서 공의 중심(x, y)과 가장 가까운 지점 찾기
+            // 1. 블록의 사각형 영역 안에서 공의 중심(x, y)과 가장 가까운 지점(충돌점) 찾기
             let closestX = Math.max(b.x, Math.min(x, b.x + currentWidth));
             let closestY = Math.max(b.y, Math.min(y, b.y + currentHeight));
 
@@ -458,22 +457,46 @@ function collisionDetection() {
                 let hitTopOrBottom = (prevY <= b.y || prevY >= b.y + currentHeight);
                 let hitLeftOrRight = (prevX <= b.x || prevX >= b.x + currentWidth);
 
-                // 5. 직관적인 단순 반사 및 끼임 방지(위치 보정) 처리
+                // 5. 충돌 면에 따른 반사 처리
                 if (hitTopOrBottom && !hitLeftOrRight) {
-                    dy = -dy; // 고전 아케이드 방식의 상하 반전
-                    // 공을 블록 바깥으로 강제로 밀어내어 틈새 끼임 방지
+                    // 상하 평면 충돌
+                    dy = -dy; 
                     y = (prevY <= b.y) ? b.y - ballRadius : b.y + currentHeight + ballRadius;
                 } 
                 else if (hitLeftOrRight && !hitTopOrBottom) {
-                    dx = -dx; // 고전 아케이드 방식의 좌우 반전
+                    // 좌우 평면 충돌
+                    dx = -dx; 
                     x = (prevX <= b.x) ? b.x - ballRadius : b.x + currentWidth + ballRadius;
                 } 
                 else {
-                    // 완벽한 모서리 충돌 (동시에 양면 충돌)
-                    dx = -dx;
-                    dy = -dy;
+                    // ==========================================
+                    // 💡 [핵심 구현] 모서리 정밀 충돌 물리 엔진 적용
+                    // ==========================================
+                    let distance = Math.sqrt(distanceSquared);
+                    
+                    // 예외 처리: 공의 중심이 정확히 모서리와 겹친 경우 (단순 반전)
+                    if (distance === 0) {
+                        dx = -dx;
+                        dy = -dy;
+                    } else {
+                        // 1) 법선 벡터 정규화 (길이를 1로 만듦)
+                        let nx = distanceX / distance;
+                        let ny = distanceY / distance;
+
+                        // 2) 속도 벡터와 법선 벡터의 내적(Dot Product) 계산
+                        let dotProduct = (dx * nx) + (dy * ny);
+
+                        // 3) 반사 벡터 공식 (Reflection Vector) 적용
+                        dx = dx - 2 * dotProduct * nx;
+                        dy = dy - 2 * dotProduct * ny;
+                        
+                        // 4) 모서리 끼임(겹침) 방지를 위해 공을 충돌 지점 바깥으로 정확히 밀어냄
+                        x = closestX + nx * ballRadius;
+                        y = closestY + ny * ballRadius;
+                    }
                 }
 
+                // 블록 타격 효과 실행
                 b.onHit(); 
 
                 // 클리어 조건 검사
